@@ -3,138 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>自定义颜色标点地图</title>
-    <!-- 引入高德地图 JavaScript API -->
-    <script src="https://webapi.amap.com/maps?v=1.4.15&key=dfb6b0e820c827ed82a141c3f09cda37"></script>
+    <title>地图标点同步</title>
+    <script src="https://webapi.amap.com/maps?v=1.4.15&key=YOUR_AMAP_KEY"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database.js"></script>
     <style>
-        /* 设置地图容器的宽度和高度 */
-        #map { width: 100%; height: 600px; }
-        #adminLoginContainer {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.5);
-            color: white;
-            padding: 10px;
-            cursor: pointer;
-            border-radius: 5px;
+        #map {
+            width: 100%;
+            height: 600px;
         }
-        #adminPasswordModal {
-            display: none;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px;
-            border-radius: 5px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            z-index: 9999;
-        }
-        #adminPasswordModal input {
-            padding: 10px;
-            width: 200px;
-            margin: 10px 0;
-        }
-        #adminPasswordModal button {
-            padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        #adminPasswordModal button:hover {
-            background-color: #0056b3;
-        }
-        #colorPickerContainer {
+        #colorPicker {
             margin: 10px;
-            display: none;
-        }
-        #searchContainer {
-            margin: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #searchInput {
-            padding: 5px;
-            font-size: 14px;
-            width: 200px;
-            margin-right: 10px;
-        }
-        #searchButton {
-            padding: 6px 12px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        #searchButton:hover {
-            background-color: #0056b3;
         }
     </style>
 </head>
 <body>
-
-    <!-- 地图容器 -->
     <div id="map"></div>
+    <input type="color" id="colorPicker" value="#ff0000">
 
-    <!-- 管理员登录入口 -->
-    <div id="adminLoginContainer" onclick="showAdminLogin()">管理员登录</div>
+    <script type="module">
+        // Import Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.0/firebase-app.js";
+        import { getDatabase, ref, push, onChildAdded, remove } from "https://www.gstatic.com/firebasejs/9.6.0/firebase-database.js";
 
-    <!-- 管理员密码输入框 -->
-    <div id="adminPasswordModal">
-        <h3>请输入管理员密码</h3>
-        <input type="password" id="passwordInput" placeholder="管理员密码" />
-        <button onclick="login()">登录</button>
-    </div>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDlsz0jj39xtl5Xb-ItuzWqaPjQXHMwHhQ",
+            authDomain: "maps-e5dfe.firebaseapp.com",
+            databaseURL: "https://maps-e5dfe-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "maps-e5dfe",
+            storageBucket: "maps-e5dfe.firebasestorage.app",
+            messagingSenderId: "764406266678",
+            appId: "1:764406266678:web:675c2ff4db842ff1591197"
+        };
 
-    <div id="colorPickerContainer">
-        <label for="colorPicker">选择标点颜色:</label>
-        <input type="color" id="colorPicker" value="#ff0000" />
-    </div>
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);  // 获取数据库引用
 
-    <!-- 普通用户搜索框 -->
-    <div id="searchContainer">
-        <input type="text" id="searchInput" placeholder="搜索标点标题..." onkeydown="checkEnter(event)" />
-        <button id="searchButton" onclick="performSearch()">搜索</button>
-    </div>
-
-    <script>
-        var markers = [];  // 用于保存标点对象，便于删除
-        var map = new AMap.Map('map', {
-            center: [121.498586, 31.239637], // 初始地图的中心位置（上海）
-            zoom: 13 // 初始缩放级别
+        // 初始化高德地图
+        const map = new AMap.Map('map', {
+            center: [121.498586, 31.239637],  // 上海坐标
+            zoom: 13
         });
 
-        var currentUserRole = sessionStorage.getItem('userRole') || 'user'; // 默认普通用户
-        var db;
+        let markers = {}; // 存储标点的引用，以便删除
 
-        // 打开 IndexedDB 数据库
-        function openDatabase() {
-            var request = indexedDB.open("MapMarkersDB", 1); // 数据库名和版本号
-
-            request.onupgradeneeded = function(event) {
-                var db = event.target.result;
-                if (!db.objectStoreNames.contains("markers")) {
-                    var objectStore = db.createObjectStore("markers", { keyPath: "id", autoIncrement: true });
-                    objectStore.createIndex("title", "title", { unique: false });
-                    objectStore.createIndex("description", "description", { unique: false });
-                }
-            };
-
-            request.onsuccess = function(event) {
-                db = event.target.result;
-                console.log("数据库打开成功");
-                loadMarkersFromDB();  // 数据库打开成功后，加载已保存的标点
-            };
-
-            request.onerror = function(event) {
-                console.error("数据库打开失败", event);
-            };
+        // 加载 Firebase 中的标点
+        function loadMarkersFromFirebase() {
+            const markersRef = ref(database, 'markers');
+            onChildAdded(markersRef, (snapshot) => {
+                const markerData = snapshot.val();
+                addMarker(markerData.lng, markerData.lat, markerData.color, markerData.title, markerData.description, snapshot.key);
+            });
         }
 
-        // 创建自定义颜色标点
+        // 将标点数据添加到地图
+        function addMarker(lng, lat, color, title, description, key) {
+            var icon = createCustomIcon(color);
+            var marker = new AMap.Marker({
+                position: new AMap.LngLat(lng, lat),
+                title: title,
+                icon: icon
+            });
+
+            marker.on('click', function() {
+                alert(`标题: ${title}\n描述: ${description}`);
+            });
+
+            marker.on('rightclick', function() {
+                // 右键删除确认框
+                if (confirm('确认删除该标点吗？')) {
+                    deleteMarker(key); // 删除标点
+                }
+            });
+
+            marker.setMap(map);
+            markers[key] = marker; // 保存标点的引用
+        }
+
+        // 创建自定义标点图标
         function createCustomIcon(color) {
             var canvas = document.createElement('canvas');
             canvas.width = 32;
@@ -152,148 +100,56 @@
             return icon;
         }
 
-        // 保存标点数据到 IndexedDB
-        function saveMarkerToDB(markerData) {
-            var transaction = db.transaction(["markers"], "readwrite");
-            var objectStore = transaction.objectStore("markers");
-            var request = objectStore.add(markerData);
-
-            request.onsuccess = function(event) {
-                console.log("标点数据保存成功", event.target.result);
-            };
-
-            request.onerror = function(event) {
-                console.error("保存标点数据失败", event);
-            };
-        }
-
-        // 从 IndexedDB 获取并加载标点数据
-        function loadMarkersFromDB() {
-            var transaction = db.transaction(["markers"], "readonly");
-            var objectStore = transaction.objectStore("markers");
-            var request = objectStore.getAll(); // 获取所有标记数据
-
-            request.onsuccess = function(event) {
-                var markersData = event.target.result;
-                markersData.forEach(function(markerData) {
-                    addMarker(markerData.lng, markerData.lat, markerData.color, markerData.title, markerData.description, markerData.id);
-                });
-            };
-
-            request.onerror = function(event) {
-                console.error("获取标点数据失败", event);
-            };
-        }
-
-        // 添加标点到地图
-        function addMarker(lng, lat, color, title, description, id) {
-            var icon = createCustomIcon(color);
-            var marker = new AMap.Marker({
-                position: new AMap.LngLat(lng, lat),
+        // 上传标点到 Firebase
+        function uploadMarkerToFirebase(lng, lat, color, title, description) {
+            const markerData = {
+                lng: lng,
+                lat: lat,
+                color: color,
                 title: title,
-                icon: icon
-            });
-
-            // 右键点击标点删除
-            marker.on('rightclick', function() {
-                if (confirm("确定删除该标点吗？")) {
-                    marker.setMap(null);  // 从地图中移除标点
-                    deleteMarkerFromDB(id);  // 从 IndexedDB 中删除标点数据
-                }
-            });
-
-            marker.setMap(map);  
-            markers.push(marker);
-
-            // 保存标点数据到 IndexedDB
-            saveMarkerToDB({ lng, lat, color, title, description, id: id });
-        }
-
-        // 从 IndexedDB 中删除标点
-        function deleteMarkerFromDB(id) {
-            var transaction = db.transaction(["markers"], "readwrite");
-            var objectStore = transaction.objectStore("markers");
-            var request = objectStore.delete(id);
-
-            request.onsuccess = function(event) {
-                console.log("标点已删除");
+                description: description
             };
 
-            request.onerror = function(event) {
-                console.error("删除标点失败", event);
-            };
+            const markersRef = ref(database, 'markers');
+            push(markersRef, markerData).then((snapshot) => {
+                const newMarkerData = snapshot.val(); // 获取上传后的标点数据
+                addMarker(newMarkerData.lng, newMarkerData.lat, newMarkerData.color, newMarkerData.title, newMarkerData.description, snapshot.key);
+                console.log('标点上传成功！');
+            }).catch((error) => {
+                console.error('Error uploading marker:', error);
+            });
         }
 
-        // 显示管理员登录框
-        function showAdminLogin() {
-            document.getElementById('adminPasswordModal').style.display = 'block';
+        // 删除标点
+        function deleteMarker(key) {
+            // 从 Firebase 删除标点
+            const markerRef = ref(database, 'markers/' + key);
+            remove(markerRef).then(() => {
+                // 从地图上移除标点
+                markers[key].setMap(null);
+                delete markers[key]; // 删除存储的标点引用
+                console.log('标点已删除');
+            }).catch((error) => {
+                console.error('Error deleting marker:', error);
+            });
         }
 
-        // 登录处理
-        function login() {
-            var password = document.getElementById('passwordInput').value;
-            if (password === 'Urgo2024') {
-                sessionStorage.setItem('userRole', 'admin');
-                currentUserRole = 'admin';
-                document.getElementById('adminPasswordModal').style.display = 'none';
-                enableAdminFeatures();
-            } else {
-                alert("密码错误！");
-            }
-        }
-
-        // 激活管理员功能
-        function enableAdminFeatures() {
-            document.getElementById('colorPickerContainer').style.display = 'block';
-            alert('管理员登录成功！您现在可以添加标点和设置标签。');
-        }
-
-        // 点击地图时添加标点
+        // 监听地图点击事件，允许添加标点
         map.on('click', function(e) {
-            if (currentUserRole === 'admin') {
-                var lngLat = e.lnglat;
-                var lng = lngLat.lng;
-                var lat = lngLat.lat;
-                var color = document.getElementById('colorPicker').value;
-                var title = prompt("请输入标点标题：", "默认标题");
-                var description = prompt("请输入标点描述：", "默认描述");
-                if (title && description) {
-                    addMarker(lng, lat, color, title, description); 
-                }
-            } else {
-                alert("你没有权限添加标点！");
+            var lngLat = e.lnglat;
+            var lng = lngLat.lng;
+            var lat = lngLat.lat;
+            var color = document.getElementById('colorPicker').value;
+            var title = prompt("请输入标点标题：", "默认标题");
+            var description = prompt("请输入标点描述：", "默认描述");
+
+            if (title && description) {
+                uploadMarkerToFirebase(lng, lat, color, title, description);
             }
         });
 
-        // 搜索功能：根据输入的标题进行搜索
-        function performSearch() {
-            var searchTerm = document.getElementById('searchInput').value.trim();
-            if (searchTerm !== '') {
-                markers.forEach(function(marker) {
-                    if (marker.getTitle().includes(searchTerm)) {
-                        map.setCenter(marker.getPosition());
-                        map.setZoom(15);
-                    }
-                });
-            } else {
-                markers.forEach(function(marker) {
-                    marker.setMap(map);
-                });
-            }
-        }
-
-        // 监听回车键触发搜索
-        function checkEnter(event) {
-            if (event.key === 'Enter') {
-                performSearch();
-            }
-        }
-
-        // 页面加载时打开数据库
-        window.onload = function() {
-            openDatabase();
-        };
+        // 初始加载所有标点
+        loadMarkersFromFirebase();
     </script>
-
 </body>
 </html>
