@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>高德地图</title>
+  <script src="https://webapi.amap.com/maps?v=2.0&key=dfb6b0e820c827ed82a141c3f09cda37"></script>
+</head>
+<body>
+  <div id="map-container" style="width: 100%; height: 100%;"></div>
+  <script>
+    var map = new AMap.Map('map-container', {
+      center: [121.4737, 31.2304],
+      zoom: 10
+    });
+
+    function addMarker() {
+      var marker = new AMap.Marker({
+        position: [121.4737, 31.2304],
+        map: map
+      });
+      map.add(marker);
+    }
+
+    // 调用addMarker函数添加标记
+    addMarker();
+  </script>
+</body>
+</html>
