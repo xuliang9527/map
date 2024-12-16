@@ -4,13 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>自定义颜色标点地图</title>
-    <script src="https://webapi.amap.com/maps?v=1.4.15&key=你的API_KEY"></script>
+    <!-- 引入高德地图 JavaScript API -->
+    <script src="https://webapi.amap.com/maps?v=1.4.15&key=dfb6b0e820c827ed82a141c3f09cda37"></script>
     <style>
         /* 设置地图容器的宽度和高度 */
-        #map {
-            width: 100%;
-            height: 600px;
-        }
+        #map { width: 100%; height: 600px; }
         #adminLoginContainer {
             position: absolute;
             top: 20px;
@@ -48,8 +46,9 @@
         #adminPasswordModal button:hover {
             background-color: #0056b3;
         }
-        #colorPicker {
+        #colorPickerContainer {
             margin: 10px;
+            display: none;
         }
         #searchContainer {
             margin: 10px;
@@ -73,34 +72,29 @@
         #searchButton:hover {
             background-color: #0056b3;
         }
-        .label-container {
-            display: flex;
-            flex-direction: column;
-        }
-        .label-container input {
-            margin: 5px 0;
-            padding: 5px;
-            width: 250px;
-        }
     </style>
 </head>
 <body>
 
+    <!-- 地图容器 -->
     <div id="map"></div>
 
+    <!-- 管理员登录入口 -->
     <div id="adminLoginContainer" onclick="showAdminLogin()">管理员登录</div>
 
+    <!-- 管理员密码输入框 -->
     <div id="adminPasswordModal">
         <h3>请输入管理员密码</h3>
         <input type="password" id="passwordInput" placeholder="管理员密码" />
         <button onclick="login()">登录</button>
     </div>
 
-    <div id="colorPickerContainer" style="display:none;">
+    <div id="colorPickerContainer">
         <label for="colorPicker">选择标点颜色:</label>
         <input type="color" id="colorPicker" value="#ff0000" />
     </div>
 
+    <!-- 普通用户搜索框 -->
     <div id="searchContainer">
         <input type="text" id="searchInput" placeholder="搜索标点标题..." onkeydown="checkEnter(event)" />
         <button id="searchButton" onclick="performSearch()">搜索</button>
@@ -114,28 +108,33 @@
         });
 
         var currentUserRole = sessionStorage.getItem('userRole') || 'user'; // 默认普通用户
+        var db;
 
-        function showAdminLogin() {
-            document.getElementById('adminPasswordModal').style.display = 'block';
+        // 打开 IndexedDB 数据库
+        function openDatabase() {
+            var request = indexedDB.open("MapMarkersDB", 1); // 数据库名和版本号
+
+            request.onupgradeneeded = function(event) {
+                var db = event.target.result;
+                if (!db.objectStoreNames.contains("markers")) {
+                    var objectStore = db.createObjectStore("markers", { keyPath: "id", autoIncrement: true });
+                    objectStore.createIndex("title", "title", { unique: false });
+                    objectStore.createIndex("description", "description", { unique: false });
+                }
+            };
+
+            request.onsuccess = function(event) {
+                db = event.target.result;
+                console.log("数据库打开成功");
+                loadMarkersFromDB();  // 数据库打开成功后，加载已保存的标点
+            };
+
+            request.onerror = function(event) {
+                console.error("数据库打开失败", event);
+            };
         }
 
-        function login() {
-            var password = document.getElementById('passwordInput').value;
-            if (password === 'Urgo2024') {
-                sessionStorage.setItem('userRole', 'admin');
-                currentUserRole = 'admin';
-                document.getElementById('adminPasswordModal').style.display = 'none';
-                enableAdminFeatures();
-            } else {
-                alert("密码错误！");
-            }
-        }
-
-        function enableAdminFeatures() {
-            document.getElementById('colorPickerContainer').style.display = 'block';
-            alert('管理员登录成功！您现在可以添加标点和设置标签。');
-        }
-
+        // 创建自定义颜色标点
         function createCustomIcon(color) {
             var canvas = document.createElement('canvas');
             canvas.width = 32;
@@ -153,7 +152,41 @@
             return icon;
         }
 
-        function addMarker(lng, lat, color, title, description) {
+        // 保存标点数据到 IndexedDB
+        function saveMarkerToDB(markerData) {
+            var transaction = db.transaction(["markers"], "readwrite");
+            var objectStore = transaction.objectStore("markers");
+            var request = objectStore.add(markerData);
+
+            request.onsuccess = function(event) {
+                console.log("标点数据保存成功", event.target.result);
+            };
+
+            request.onerror = function(event) {
+                console.error("保存标点数据失败", event);
+            };
+        }
+
+        // 从 IndexedDB 获取并加载标点数据
+        function loadMarkersFromDB() {
+            var transaction = db.transaction(["markers"], "readonly");
+            var objectStore = transaction.objectStore("markers");
+            var request = objectStore.getAll(); // 获取所有标记数据
+
+            request.onsuccess = function(event) {
+                var markersData = event.target.result;
+                markersData.forEach(function(markerData) {
+                    addMarker(markerData.lng, markerData.lat, markerData.color, markerData.title, markerData.description, markerData.id);
+                });
+            };
+
+            request.onerror = function(event) {
+                console.error("获取标点数据失败", event);
+            };
+        }
+
+        // 添加标点到地图
+        function addMarker(lng, lat, color, title, description, id) {
             var icon = createCustomIcon(color);
             var marker = new AMap.Marker({
                 position: new AMap.LngLat(lng, lat),
@@ -161,75 +194,61 @@
                 icon: icon
             });
 
-            marker.on('click', function() {
-                if (currentUserRole === 'admin') {
-                    showLabel(marker, title, description);  
-                }
-            });
-
-            // 右键点击标点，弹出菜单进行取消标点
+            // 右键点击标点删除
             marker.on('rightclick', function() {
-                var confirmDelete = confirm("确定要删除这个标点吗？");
-                if (confirmDelete) {
-                    removeMarker(marker);  // 移除标点
+                if (confirm("确定删除该标点吗？")) {
+                    marker.setMap(null);  // 从地图中移除标点
+                    deleteMarkerFromDB(id);  // 从 IndexedDB 中删除标点数据
                 }
             });
 
-            marker.setMap(map);
-            return marker;
+            marker.setMap(map);  
+            markers.push(marker);
+
+            // 保存标点数据到 IndexedDB
+            saveMarkerToDB({ lng, lat, color, title, description, id: id });
         }
 
-        // 移除标点
-        function removeMarker(marker) {
-            // 从地图中删除
-            marker.setMap(null);
-            // 从标记数组中移除
-            markers = markers.filter(m => m !== marker);
-            // 从 localStorage 中移除
-            saveMarkers();
+        // 从 IndexedDB 中删除标点
+        function deleteMarkerFromDB(id) {
+            var transaction = db.transaction(["markers"], "readwrite");
+            var objectStore = transaction.objectStore("markers");
+            var request = objectStore.delete(id);
+
+            request.onsuccess = function(event) {
+                console.log("标点已删除");
+            };
+
+            request.onerror = function(event) {
+                console.error("删除标点失败", event);
+            };
         }
 
-        function showLabel(marker, title, description) {
-            var content = `
-                <div class="label-container">
-                    <label for="titleInput">标题:</label>
-                    <input type="text" id="titleInput" value="${title}" />
-                    <label for="descriptionInput">描述:</label>
-                    <input type="text" id="descriptionInput" value="${description}" />
-                    <button onclick="saveLabel('${marker.getPosition().lng}', '${marker.getPosition().lat}')">保存</button>
-                </div>
-            `;
-            var infoWindow = new AMap.InfoWindow({
-                content: content,
-                offset: new AMap.Pixel(0, -30)
-            });
-            infoWindow.open(map, marker.getPosition());
+        // 显示管理员登录框
+        function showAdminLogin() {
+            document.getElementById('adminPasswordModal').style.display = 'block';
         }
 
-        function saveLabel(lng, lat) {
-            var title = document.getElementById('titleInput').value;
-            var description = document.getElementById('descriptionInput').value;
-
-            var marker = markers.find(m => m.getPosition().lng === parseFloat(lng) && m.getPosition().lat === parseFloat(lat));
-            if (marker) {
-                marker.setTitle(title);
-                marker.setExtData({ description: description });
+        // 登录处理
+        function login() {
+            var password = document.getElementById('passwordInput').value;
+            if (password === 'Urgo2024') {
+                sessionStorage.setItem('userRole', 'admin');
+                currentUserRole = 'admin';
+                document.getElementById('adminPasswordModal').style.display = 'none';
+                enableAdminFeatures();
+            } else {
+                alert("密码错误！");
             }
-
-            saveMarkers();
         }
 
-        function saveMarkers() {
-            var savedMarkers = markers.map(function(marker) {
-                var position = marker.getPosition();
-                var color = marker.getIcon().image.split('#')[1];
-                var title = marker.getTitle();
-                var description = marker.getExtData() ? marker.getExtData().description : '';
-                return { lng: position.lng, lat: position.lat, color: `#${color}`, title: title, description: description };
-            });
-            localStorage.setItem('markers', JSON.stringify(savedMarkers));
+        // 激活管理员功能
+        function enableAdminFeatures() {
+            document.getElementById('colorPickerContainer').style.display = 'block';
+            alert('管理员登录成功！您现在可以添加标点和设置标签。');
         }
 
+        // 点击地图时添加标点
         map.on('click', function(e) {
             if (currentUserRole === 'admin') {
                 var lngLat = e.lnglat;
@@ -239,51 +258,41 @@
                 var title = prompt("请输入标点标题：", "默认标题");
                 var description = prompt("请输入标点描述：", "默认描述");
                 if (title && description) {
-                    var marker = addMarker(lng, lat, color, title, description);
-                    markers.push(marker);
-                    saveMarkers();
+                    addMarker(lng, lat, color, title, description); 
                 }
             } else {
                 alert("你没有权限添加标点！");
             }
         });
 
-        function searchMarkers(searchTerm) {
-            var found = false;
-            markers.forEach(function(marker) {
-                if (marker.getTitle() === searchTerm) {
-                    map.setCenter(marker.getPosition());
-                    map.setZoom(15);
-                    found = true;
-                }
-            });
-            if (!found) {
-                alert('未找到标点');
+        // 搜索功能：根据输入的标题进行搜索
+        function performSearch() {
+            var searchTerm = document.getElementById('searchInput').value.trim();
+            if (searchTerm !== '') {
+                markers.forEach(function(marker) {
+                    if (marker.getTitle().includes(searchTerm)) {
+                        map.setCenter(marker.getPosition());
+                        map.setZoom(15);
+                    }
+                });
+            } else {
+                markers.forEach(function(marker) {
+                    marker.setMap(map);
+                });
             }
         }
 
+        // 监听回车键触发搜索
         function checkEnter(event) {
             if (event.key === 'Enter') {
                 performSearch();
             }
         }
 
-        function performSearch() {
-            var searchTerm = document.getElementById('searchInput').value.trim();
-            if (searchTerm !== '') {
-                searchMarkers(searchTerm);
-            }
-        }
-
-        function loadMarkers() {
-            var savedMarkers = JSON.parse(localStorage.getItem('markers')) || [];
-            savedMarkers.forEach(function(markerData) {
-                var marker = addMarker(markerData.lng, markerData.lat, markerData.color, markerData.title, markerData.description);
-                markers.push(marker);
-            });
-        }
-
-        loadMarkers();
+        // 页面加载时打开数据库
+        window.onload = function() {
+            openDatabase();
+        };
     </script>
 
 </body>
