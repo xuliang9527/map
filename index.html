@@ -51,4 +51,240 @@
         #colorPicker {
             margin: 10px;
         }
-        #searchCo
+        #searchContainer {
+            margin: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #searchInput {
+            padding: 5px;
+            font-size: 14px;
+            width: 200px;
+            margin-right: 10px;
+        }
+        #searchButton {
+            padding: 6px 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #searchButton:hover {
+            background-color: #0056b3;
+        }
+        .label-container {
+            display: flex;
+            flex-direction: column;
+        }
+        .label-container input {
+            margin: 5px 0;
+            padding: 5px;
+            width: 250px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="adminLoginContainer" onclick="showAdminLogin()">管理员登录</div>
+
+    <div id="adminPasswordModal">
+        <h3>请输入管理员密码</h3>
+        <input type="password" id="passwordInput" placeholder="管理员密码" />
+        <button onclick="login()">登录</button>
+    </div>
+
+    <div id="colorPickerContainer" style="display:none;">
+        <label for="colorPicker">选择标点颜色:</label>
+        <input type="color" id="colorPicker" value="#ff0000" />
+    </div>
+
+    <div id="searchContainer">
+        <input type="text" id="searchInput" placeholder="搜索标点标题..." onkeydown="checkEnter(event)" />
+        <button id="searchButton" onclick="performSearch()">搜索</button>
+    </div>
+
+    <script>
+        var markers = [];  // 用于保存标点对象，便于删除
+        var map = new AMap.Map('map', {
+            center: [121.498586, 31.239637], // 初始地图的中心位置（上海）
+            zoom: 13 // 初始缩放级别
+        });
+
+        var currentUserRole = sessionStorage.getItem('userRole') || 'user'; // 默认普通用户
+
+        function showAdminLogin() {
+            document.getElementById('adminPasswordModal').style.display = 'block';
+        }
+
+        function login() {
+            var password = document.getElementById('passwordInput').value;
+            if (password === 'Urgo2024') {
+                sessionStorage.setItem('userRole', 'admin');
+                currentUserRole = 'admin';
+                document.getElementById('adminPasswordModal').style.display = 'none';
+                enableAdminFeatures();
+            } else {
+                alert("密码错误！");
+            }
+        }
+
+        function enableAdminFeatures() {
+            document.getElementById('colorPickerContainer').style.display = 'block';
+            alert('管理员登录成功！您现在可以添加标点和设置标签。');
+        }
+
+        function createCustomIcon(color) {
+            var canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            var ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.arc(16, 16, 14, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.stroke();
+            var icon = new AMap.Icon({
+                image: canvas.toDataURL(),
+                size: new AMap.Size(32, 32)
+            });
+            return icon;
+        }
+
+        function addMarker(lng, lat, color, title, description) {
+            var icon = createCustomIcon(color);
+            var marker = new AMap.Marker({
+                position: new AMap.LngLat(lng, lat),
+                title: title,
+                icon: icon
+            });
+
+            marker.on('click', function() {
+                if (currentUserRole === 'admin') {
+                    showLabel(marker, title, description);  
+                }
+            });
+
+            // 右键点击标点，弹出菜单进行取消标点
+            marker.on('rightclick', function() {
+                var confirmDelete = confirm("确定要删除这个标点吗？");
+                if (confirmDelete) {
+                    removeMarker(marker);  // 移除标点
+                }
+            });
+
+            marker.setMap(map);
+            return marker;
+        }
+
+        // 移除标点
+        function removeMarker(marker) {
+            // 从地图中删除
+            marker.setMap(null);
+            // 从标记数组中移除
+            markers = markers.filter(m => m !== marker);
+            // 从 localStorage 中移除
+            saveMarkers();
+        }
+
+        function showLabel(marker, title, description) {
+            var content = `
+                <div class="label-container">
+                    <label for="titleInput">标题:</label>
+                    <input type="text" id="titleInput" value="${title}" />
+                    <label for="descriptionInput">描述:</label>
+                    <input type="text" id="descriptionInput" value="${description}" />
+                    <button onclick="saveLabel('${marker.getPosition().lng}', '${marker.getPosition().lat}')">保存</button>
+                </div>
+            `;
+            var infoWindow = new AMap.InfoWindow({
+                content: content,
+                offset: new AMap.Pixel(0, -30)
+            });
+            infoWindow.open(map, marker.getPosition());
+        }
+
+        function saveLabel(lng, lat) {
+            var title = document.getElementById('titleInput').value;
+            var description = document.getElementById('descriptionInput').value;
+
+            var marker = markers.find(m => m.getPosition().lng === parseFloat(lng) && m.getPosition().lat === parseFloat(lat));
+            if (marker) {
+                marker.setTitle(title);
+                marker.setExtData({ description: description });
+            }
+
+            saveMarkers();
+        }
+
+        function saveMarkers() {
+            var savedMarkers = markers.map(function(marker) {
+                var position = marker.getPosition();
+                var color = marker.getIcon().image.split('#')[1];
+                var title = marker.getTitle();
+                var description = marker.getExtData() ? marker.getExtData().description : '';
+                return { lng: position.lng, lat: position.lat, color: `#${color}`, title: title, description: description };
+            });
+            localStorage.setItem('markers', JSON.stringify(savedMarkers));
+        }
+
+        map.on('click', function(e) {
+            if (currentUserRole === 'admin') {
+                var lngLat = e.lnglat;
+                var lng = lngLat.lng;
+                var lat = lngLat.lat;
+                var color = document.getElementById('colorPicker').value;
+                var title = prompt("请输入标点标题：", "默认标题");
+                var description = prompt("请输入标点描述：", "默认描述");
+                if (title && description) {
+                    var marker = addMarker(lng, lat, color, title, description);
+                    markers.push(marker);
+                    saveMarkers();
+                }
+            } else {
+                alert("你没有权限添加标点！");
+            }
+        });
+
+        function searchMarkers(searchTerm) {
+            var found = false;
+            markers.forEach(function(marker) {
+                if (marker.getTitle() === searchTerm) {
+                    map.setCenter(marker.getPosition());
+                    map.setZoom(15);
+                    found = true;
+                }
+            });
+            if (!found) {
+                alert('未找到标点');
+            }
+        }
+
+        function checkEnter(event) {
+            if (event.key === 'Enter') {
+                performSearch();
+            }
+        }
+
+        function performSearch() {
+            var searchTerm = document.getElementById('searchInput').value.trim();
+            if (searchTerm !== '') {
+                searchMarkers(searchTerm);
+            }
+        }
+
+        function loadMarkers() {
+            var savedMarkers = JSON.parse(localStorage.getItem('markers')) || [];
+            savedMarkers.forEach(function(markerData) {
+                var marker = addMarker(markerData.lng, markerData.lat, markerData.color, markerData.title, markerData.description);
+                markers.push(marker);
+            });
+        }
+
+        loadMarkers();
+    </script>
+
+</body>
+</html>
